@@ -1,9 +1,19 @@
 package com.xafero.tscoj.impl;
 
-import java.io.File;
+import static com.xafero.tscoj.util.TypeUtils.concat;
+import static com.xafero.tscoj.util.TypeUtils.getName;
+import static com.xafero.tscoj.util.TypeUtils.getResults;
+import static com.xafero.tscoj.util.TypeUtils.patchTsc;
+import static com.xafero.tscoj.util.TypeUtils.readResource;
+
+import java.io.Closeable;
 import java.io.IOException;
-import java.io.InputStream;
-import java.util.LinkedHashMap;
+import java.io.Writer;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
@@ -13,70 +23,95 @@ import javax.script.CompiledScript;
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
+import javax.tools.DiagnosticListener;
 
 import org.apache.commons.io.IOUtils;
 
+import com.xafero.natra.api.INativeParams;
+import com.xafero.natra.common.AbstractNativeTranslator;
 import com.xafero.tscoj.api.IExecutor;
-import com.xafero.tscoj.api.ITranspiler;
 import com.xafero.tscoj.base.AbstractSystem;
+import com.xafero.tscoj.base.TypeScriptFile;
+import com.xafero.tscoj.util.ScriptMessage;
 
-public class NashornCompiler<T extends ScriptEngine & Compilable> implements ITranspiler {
+public class NashornCompiler<T extends ScriptEngine & Compilable>
+		extends AbstractNativeTranslator<CompiledScript, String> implements Closeable {
 
 	private static final String TSV = "2.1.4";
 	private static final String TSP = "META-INF/resources/webjars/typescript/" + TSV + "/lib";
-
 	private static final String TSC = TSP + "/" + "tsc.js";
-	public static final String LDT = TSP + "/" + "lib.d.ts";
+	private static final String LDT = TSP + "/" + "lib.d.ts";
 
 	private static final String SYS = "META-INF/resources/utils.js";
 	private static final String ENC = "UTF8";
-	private static final String CODE_PREFIX = "code";
-	private static final String CODE = CODE_PREFIX + ".ts";
 
+	private final ClassLoader loader;
 	private final T engine;
 	private final Bindings scope;
-	private final ClassLoader loader;
 
-	private AbstractSystem sys;
 	private IExecutor exec;
+	private AbstractSystem sys;
 
-	public NashornCompiler() {
-		this(NashornCompiler.class);
+	public NashornCompiler(NashornCompilerFactory factory) {
+		this(factory, NashornCompiler.class);
 	}
 
-	public NashornCompiler(Class<?> type) {
-		this(type.getClassLoader());
+	public NashornCompiler(NashornCompilerFactory factory, Class<?> type) {
+		this(factory, type.getClassLoader());
 	}
 
-	public NashornCompiler(ClassLoader loader) {
-		this(loader, new ScriptEngineManager(loader));
+	public NashornCompiler(NashornCompilerFactory factory, ClassLoader loader) {
+		this(factory, loader, new ScriptEngineManager(loader));
 	}
 
 	@SuppressWarnings("unchecked")
-	public NashornCompiler(ClassLoader loader, ScriptEngineManager manager) {
-		this(loader, (T) manager.getEngineByExtension("js"));
+	public NashornCompiler(NashornCompilerFactory factory, ClassLoader loader, ScriptEngineManager manager) {
+		this(factory, loader, (T) manager.getEngineByExtension("js"));
 	}
 
-	public NashornCompiler(ClassLoader loader, T engine) {
+	public NashornCompiler(NashornCompilerFactory factory, ClassLoader loader, T engine) {
+		super(factory);
 		this.loader = loader;
 		this.engine = engine;
 		this.scope = engine.createBindings();
 	}
 
 	@Override
-	public String compile(String code) {
-		try {
-			return toJavaScript(code).get(CODE_PREFIX + ".js");
-		} catch (IOException | ScriptException e) {
-			throw new UnsupportedOperationException(e);
+	protected synchronized Map<URI, Entry<CompiledScript, String>> translateImpl(INativeParams params) {
+		Map<URI, String> sources = params.getSources();
+		Writer out = params.getOutput();
+		DiagnosticListener<URI> diag = params;
+		List<TypeScriptFile> files = toFiles(sources);
+		List<String> fileNames = new ArrayList<>(files.size());
+		if (exec == null)
+			try {
+				prepareTypeScriptCompiler();
+			} catch (ScriptException e) {
+				diag.report(new ScriptMessage(e));
+				return Collections.emptyMap();
+			}
+		IOUtils.closeQuietly(sys);
+		sys.setOut(out);
+		sys.setDiagnose(new DiagnoseParse(diag));
+		sys.push(getName(LDT), readResource(loader, LDT, ENC));
+		for (TypeScriptFile file : files) {
+			fileNames.add(file.getPath());
+			sys.push(file.getPath(), file.getCode());
 		}
+		// "--diagnostics", "--listFiles", "--listEmittedFiles"
+		final String[] baseArgs = { "--declaration", "--traceResolution", "--removeComments", "--target", "es3" };
+		String[] args = concat(baseArgs, fileNames);
+		exec.executeCommandLine(args);
+		return getResults(sys.dump(), fileNames, engine, diag);
 	}
 
-	private String readResource(String path) {
-		try (InputStream is = loader.getResourceAsStream(path)) {
-			return IOUtils.toString(is, ENC);
-		} catch (IOException e) {
-			throw new UnsupportedOperationException(e);
+	@Override
+	public Object run(Object binary, DiagnosticListener<URI> diag) {
+		try {
+			return ((CompiledScript) binary).eval();
+		} catch (ScriptException e) {
+			diag.report(new ScriptMessage(e));
+			return null;
 		}
 	}
 
@@ -86,59 +121,25 @@ public class NashornCompiler<T extends ScriptEngine & Compilable> implements ITr
 		sys.close();
 	}
 
-	private synchronized Map<String, String> toJavaScript(String code) throws IOException, ScriptException {
-		if (exec == null) {
-			String tsc = patchTsc(readResource(TSC));
-			CompiledScript tscScript = engine.compile(tsc);
-			scope.put("exporter", this);
-			tscScript.eval(scope);
+	private void prepareTypeScriptCompiler() throws ScriptException {
+		String tsc = patchTsc(readResource(loader, TSC, ENC));
+		CompiledScript tscScript = engine.compile(tsc);
+		scope.put("exporter", this);
+		tscScript.eval(scope);
+	}
+
+	private List<TypeScriptFile> toFiles(Map<URI, String> sources) {
+		List<TypeScriptFile> files = new LinkedList<>();
+		for (Entry<URI, String> e : sources.entrySet()) {
+			String url = e.getKey().getRawSchemeSpecificPart();
+			url = url.replace('/', '.');
+			int lidx = url.lastIndexOf('.');
+			String pkg = url.substring(0, lidx);
+			String name = url.substring(lidx + 1);
+			String code = e.getValue();
+			files.add(new TypeScriptFile(pkg, name, code));
 		}
-		sys.close();
-		sys.push(getName(LDT), readResource(LDT));
-		sys.push(CODE, code);
-		// "--diagnostics", "--listFiles", "--listEmittedFiles"
-		String[] args = { "--declaration", "--traceResolution", "--removeComments", "--target", "es3", CODE };
-		exec.executeCommandLine(args);
-		Map<String, String> result = new LinkedHashMap<>();
-		Map<String, String> mem = sys.dump();
-		for (Entry<String, String> e : mem.entrySet()) {
-			String path = e.getKey();
-			if (!(path.startsWith(CODE_PREFIX) && (path.endsWith(".js") || path.endsWith(".d.ts"))))
-				continue;
-			String got = e.getValue().trim();
-			result.put(path, got);
-		}
-		return result;
-	}
-
-	private String getName(String path) {
-		return (new File(path)).getName();
-	}
-
-	private String patchTsc(String text) {
-		String pattern = "ts.executeCommandLine(ts.sys.args);";
-		int idx = text.indexOf(pattern);
-		String realCode = text.substring(0, idx);
-		idx = realCode.indexOf("ts.Diagnostics = {");
-		idx = realCode.substring(0, idx).lastIndexOf("var ts;");
-		String first = realCode.substring(0, idx);
-		String second = realCode.substring(idx);
-		return String.format("%s %n " + "exporter.inject(ts); %n " + "%s %n " + "exporter.receive(ts); %n", first,
-				second, realCode);
-	}
-
-	public void inject(Bindings tsc) {
-		if (sys != null)
-			return;
-		sys = castJs(AbstractSystem.class, readResource(SYS));
-		tsc.put("sys", sys);
-	}
-
-	public void receive(Object tsc) throws ScriptException {
-		if (exec != null)
-			return;
-		scope.put("ts", tsc);
-		exec = castJs(IExecutor.class, "ts");
+		return files;
 	}
 
 	private <O> O castJs(Class<O> type, String key) {
@@ -148,5 +149,15 @@ public class NashornCompiler<T extends ScriptEngine & Compilable> implements ITr
 		} catch (ScriptException e) {
 			throw new UnsupportedOperationException(e);
 		}
+	}
+
+	public void inject(Bindings tsc) {
+		sys = castJs(AbstractSystem.class, readResource(loader, SYS, ENC));
+		tsc.put("sys", sys);
+	}
+
+	public void receive(Object tsc) throws ScriptException {
+		scope.put("ts", tsc);
+		exec = castJs(IExecutor.class, "ts");
 	}
 }

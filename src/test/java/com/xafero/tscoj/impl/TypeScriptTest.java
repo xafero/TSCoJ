@@ -2,18 +2,25 @@ package com.xafero.tscoj.impl;
 
 import static org.junit.Assert.assertEquals;
 
-import java.io.IOException;
+import java.util.Map.Entry;
 
 import org.junit.Test;
 
-import com.xafero.tscoj.api.ITranspiler;
+import com.xafero.natra.api.INativeParams;
+import com.xafero.natra.api.INativeTask;
 
 public class TypeScriptTest {
 
 	@Test
-	public void testCompiler() throws IOException {
-		ITranspiler tsc = new NashornCompiler<>();
-		String ts = tsc.compile("class Test { name: string }").split("//")[0];
+	public void testCompiler() throws Exception {
+		NashornCompiler<?> tsc = new NashornCompiler<>(null);
+		INativeParams parms = new TestNativeParams("class Test { name: string }");
+		INativeTask<?, ?> task = tsc.translate(parms);
+		task.call();
+		Entry<?, ?> pair;
+		pair = (Entry<?, ?>) task.getResults().entrySet().iterator().next();
+		Entry<?, ?> res = (Entry<?, ?>) pair.getValue();
+		String ts = res.getValue().toString().split("//")[0];
 		assertEquals("var Test = (function () {    function Test() {    }    return Test;}());", strip(ts));
 		tsc.close();
 	}
