@@ -38,9 +38,16 @@
 			<version>2.5</version>
 		</dependency>
 		<dependency>
-			<groupId>com.xafero.native</groupId>
-			<artifactId>natra-api</artifactId>
-			<version>0.1</version>
+			<groupId>com.github.xafero</groupId>
+			<artifactId>natra</artifactId>
+			<version>c60b529629</version>
 		</dependency>
 	</dependencies>
+
+	<repositories>
+		<repository>
+		    <id>jitpack.io</id>
+		    <url>https://jitpack.io</url>
+		</repository>
+	</repositories>
 </project>
