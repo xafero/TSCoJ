@@ -10,3 +10,4 @@ buildNumber.properties
 .settings/
 .classpath
 .project
+tscoj-mvn-sample/src/main/resources/scripts/
