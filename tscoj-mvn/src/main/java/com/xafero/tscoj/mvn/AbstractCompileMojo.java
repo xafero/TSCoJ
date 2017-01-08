@@ -1,5 +1,6 @@
 package com.xafero.tscoj.mvn;
 
+import static com.xafero.tscoj.mvn.util.HashUtils.checkIfNecessary;
 import static com.xafero.tscoj.util.TypeUtils.concat;
 import static com.xafero.tscoj.util.TypeUtils.getName;
 import static com.xafero.tscoj.util.TypeUtils.patchTsc;
@@ -83,13 +84,13 @@ public abstract class AbstractCompileMojo extends AbstractMojo implements Diagno
 		File dest = getOutputDirectory();
 		int count = 0;
 		try {
-			info("Reading files from '%s'...", src);
-			buildContext.removeMessages(src);
 			final String includes = "**/*.js,**/*.ts";
 			final String excludes = null;
 			@SuppressWarnings("unchecked")
 			List<File> files = src.exists() ? getFiles(src, includes, excludes) : Collections.EMPTY_LIST;
-			if (!files.isEmpty()) {
+			if (!files.isEmpty() && checkIfNecessary(dest, files)) {
+				info("Reading files from '%s'...", src);
+				buildContext.removeMessages(src);
 				prepareTypeScriptCompiler(loader, (Compilable) engine, scope);
 				IOUtils.closeQuietly(sys);
 				sys.setOut(out);
