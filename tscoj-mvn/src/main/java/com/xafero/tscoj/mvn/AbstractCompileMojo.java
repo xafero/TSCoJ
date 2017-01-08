@@ -63,6 +63,9 @@ public abstract class AbstractCompileMojo extends AbstractMojo implements Diagno
 	@Parameter(defaultValue = "${project}", required = true, readonly = true)
 	private MavenProject project;
 
+	@Parameter(defaultValue = "tmp/")
+	private String prefixIgnore;
+
 	private ClassLoader loader = AbstractSystem.class.getClassLoader();
 	private ScriptEngineManager mgr = new ScriptEngineManager(loader);
 	private ScriptEngine engine = mgr.getEngineByExtension("js");
@@ -100,18 +103,18 @@ public abstract class AbstractCompileMojo extends AbstractMojo implements Diagno
 					sys.push(relative, code);
 					info(" Adding '%s' to be compiled...", relative);
 				}
+				// "--pretty"
 				final String[] baseArgs = { "--allowJs", "--declaration", "--diagnostics", "--emitDecoratorMetadata",
 						"--experimentalDecorators", "--listFiles", "--listEmittedFiles", "--outFile", "deploy.js",
-						"--pretty", "--removeComments", "--sourceMap", "--stripInternal", "--traceResolution",
-						"--target", "es3" };
+						"--removeComments", "--sourceMap", "--stripInternal", "--traceResolution", "--target", "es3" };
 				String[] args = concat(baseArgs, fileNames);
 				exec.executeCommandLine(args);
 				Map<String, String> dump = sys.dump();
 				for (Entry<String, String> e : dump.entrySet()) {
 					String name = stripStart(e.getKey(), "/\\");
-					if (fileNames.contains(name))
+					if (fileNames.contains(name) || name.startsWith(getPrefixIgnore()))
 						continue;
-					info(" Storing compiled '%s' (#%s)...", name, count + 1);
+					info("  Storing compiled '%s' (#%s)...", name, count + 1);
 					String code = e.getValue();
 					File tgt = new File(dest, name);
 					tgt.getParentFile().mkdirs();
@@ -167,5 +170,9 @@ public abstract class AbstractCompileMojo extends AbstractMojo implements Diagno
 	public void receive(Object tsc) throws ScriptException {
 		scope.put("ts", tsc);
 		exec = castJs(IExecutor.class, "ts");
+	}
+
+	public String getPrefixIgnore() {
+		return prefixIgnore;
 	}
 }
