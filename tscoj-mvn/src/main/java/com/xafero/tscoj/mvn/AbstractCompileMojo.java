@@ -15,6 +15,7 @@ import java.io.PrintWriter;
 import java.io.Writer;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +68,8 @@ public abstract class AbstractCompileMojo extends AbstractMojo implements Diagno
 	@Parameter(defaultValue = "tmp/")
 	private String prefixIgnore;
 
+	private List<String> ignores = Arrays.asList("lib.d.ts");
+
 	private ClassLoader loader = AbstractSystem.class.getClassLoader();
 	private ScriptEngineManager mgr = new ScriptEngineManager(loader);
 	private ScriptEngine engine = mgr.getEngineByExtension("js");
@@ -104,17 +107,16 @@ public abstract class AbstractCompileMojo extends AbstractMojo implements Diagno
 					sys.push(relative, code);
 					info(" Adding '%s' to be compiled...", relative);
 				}
-				// "--pretty"
-				final String[] baseArgs = { "--allowJs", "--declaration", "--diagnostics", "--emitDecoratorMetadata",
-						"--experimentalDecorators", "--listFiles", "--listEmittedFiles", "--outFile", "deploy.js",
-						"--declarationDir", "info", "--removeComments", "--sourceMap", "--stripInternal",
-						"--traceResolution", "--target", "es3" };
+				// "--pretty" "--sourceMap" "--stripInternal"
+				final String[] baseArgs = { "--allowJs", "--declaration", "--declarationDir", "info", "--diagnostics",
+						"--emitDecoratorMetadata", "--experimentalDecorators", "--listFiles", "--listEmittedFiles",
+						"--outFile", "deploy.js", "--removeComments", "--traceResolution", "--target", "es3" };
 				String[] args = concat(baseArgs, fileNames);
 				exec.executeCommandLine(args);
 				Map<String, String> dump = sys.dump();
 				for (Entry<String, String> e : dump.entrySet()) {
 					String name = stripStart(e.getKey(), "/\\");
-					if (fileNames.contains(name) || name.startsWith(getPrefixIgnore()))
+					if (fileNames.contains(name) || name.startsWith(getPrefixIgnore()) || ignores.contains(name))
 						continue;
 					info("  Storing compiled '%s' (#%s)...", name, count + 1);
 					String code = e.getValue();
