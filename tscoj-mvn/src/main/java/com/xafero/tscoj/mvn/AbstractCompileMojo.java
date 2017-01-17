@@ -107,7 +107,8 @@ public abstract class AbstractCompileMojo extends AbstractMojo implements Diagno
 				// "--pretty"
 				final String[] baseArgs = { "--allowJs", "--declaration", "--diagnostics", "--emitDecoratorMetadata",
 						"--experimentalDecorators", "--listFiles", "--listEmittedFiles", "--outFile", "deploy.js",
-						"--removeComments", "--sourceMap", "--stripInternal", "--traceResolution", "--target", "es3" };
+						"--declarationDir", "info", "--removeComments", "--sourceMap", "--stripInternal",
+						"--traceResolution", "--target", "es3" };
 				String[] args = concat(baseArgs, fileNames);
 				exec.executeCommandLine(args);
 				Map<String, String> dump = sys.dump();
