@@ -102,6 +102,7 @@ public abstract class AbstractCompileMojo extends AbstractMojo implements Diagno
 				List<String> fileNames = new ArrayList<>(files.size());
 				for (File file : files) {
 					String relative = file.getAbsolutePath().replace(src + File.separator, "");
+					relative = relative.replace('\\', '/');
 					fileNames.add(relative);
 					String code = fileRead(file, ENC);
 					sys.push(relative, code);
